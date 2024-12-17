@@ -1,0 +1,243 @@
+---
+title: "Index"
+author: "Jasmine Swalwell"
+date: '2024-12-17'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Project Background
+Alcohol-specific mortality is a significant public health concern, with profound social and economic implications. Alcohol-related deaths are often linked to chronic conditions such as liver disease, alcohol poisoning, and certain cancers. However, these mortality rates are not evenly distributed across the population. Socioeconomic deprivation plays a critical role, with individuals living in more deprived areas experiencing disproportionately higher mortality rates than those in more affluent areas. This disparity may reflect broader health inequalities, driven by differences in access to healthcare, education, employment, and living conditions. Gender differences are also evident, with men typically experiencing higher alcohol-specific mortality rates than women, though the extent of this gap may vary by deprivation level. 
+This project aims to develop a visualisation which examines trends from 2011 to 2020, highlighting differences in alcohol-specific mortality between the most and least deprived groups for both males and females.
+
+## Research Question 
+"How do alcohol-specific mortality rates differ between the most and least deprived areas in England and Wales by gender from 2011 to 2020?
+
+## Project Organisation 
+The PSY6422_Project repository is structured into key sections. The /codebook provides documentation on the dataset, including variable descriptions and structure. The /data folder contains the raw datasets used in the analysis. The /plots folder stores visualistions and key findings, while the /scripts folder contains the code for data processing, analysis, and visualisation. This structure should support with navigation and reproducibility of the project.
+
+## Dataset 
+
+### Dataset origins 
+The raw data for this visualisation come the Office for National Statistics. The dataset, titled "Alcohol-Specific Deaths in the UK: Supplementary Data", monitors alcohol-specific deaths and related health trends over time. Specifically, the visualisation uses table 3 from this dataset. This table includes age-standardized mortality rates from 2011 to 2020, separated by gender (males and females) and Index of Multiple Deprivation (IMD) quintiles. Mortality rates are presented as deaths per 100,000 people. This data is collected alongside broader alcohol use and mortality statistics. 
+
+Data is available from this link:
+
+https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/healthandsocialcare/causesofdeath/datasets/alcoholspecificdeathsintheunitedkingdomsupplementarydatatables/current/alcoholspecificdeathssupplementary2020.xlsx
+
+### Potential limitations of the dataset
+While the Office for National Statistics (ONS) dataset offers valuable insights into alcohol-specific deaths, it has some limitations. The lack of regional detail makes it hard to spot local differences, and the absence of broader information, such as economic conditions or policy changes, limits understanding of the causes behind the trends. The data groups people by gender but doesn’t account for differences across age groups within men and women. It also uses age-standardized rates, which assume similar age distributions across deprivation levels, though this may not always be the case. Lastly, the 2020 data could show unusual patterns due to short-term events like the COVID-19 pandemic, rather than reflecting longer-term trends.
+
+## Preparation - Install and load libraries
+The following function will install and load packages where required for this visualisation.
+```{r message=FALSE}
+# Function to install and load multiple packages
+install_and_load <- function(packages) {
+  for (package in packages) {
+    if (!require(package, character.only = TRUE)) {
+      install.packages(package, dependencies = TRUE)  
+      library(package, character.only = TRUE)  
+    }
+  }
+}
+
+# List of required packages
+packages <- c("tidyverse", "dplyr", "readxl", "plotly", "RColorBrewer", "htmlwidgets")
+install_and_load(packages)
+
+# Clear environment
+rm(list = ls())
+```
+
+## Set the user adjustable parametres
+These are the parameters used for this visualation, however they can be easily adjusted to allow the user to customise to their own preference
+```{r}
+# File paths
+file_path <- "data/alcoholspecificdeathssupplementary2020.xlsx"  # Data folder
+static_plot_path <- "plots/alcohol_deaths_static_plot.png"       # Plots folder
+interactive_plot_path <- "plots/alcohol_deaths_interactive_plot.html"
+
+# Plot settings
+plot_title <- "Alcohol-Specific Death Rates by Gender and Deprivation Quintile"
+plot_subtitle <- "Most deprived(Q1) and least deprived(Q5) quintiles in England and Wales from 2011 - 2020"
+x_axis_label <- "Year"
+y_axis_label <- "Age-Standardised Rate per 100,000"
+plot_caption <- "Data Source: Office for National Statistics"
+
+# Custom Colors for Plot Lines
+custom_colors <- c(
+  "Q1 - Female" = "#1f78b4", 
+  "Q5 - Female" = "#e66101", 
+  "Q1 - Male"   = "#4daf4a", 
+  "Q5 - Male"   = "#984ea3"  
+)
+
+# Data Import Parameters
+excel_sheet <- 6
+skip_rows <- 3
+row_slice_start <- 2
+row_slice_end <- 51
+
+# X-axis Display Range
+years_to_display <- as.character(2011:2020)
+```
+
+## Import Data
+Now load the raw data. The dataset is located in the /data folder of the PSY6422_Project repository. Alternatively you can download it directly from this link https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/healthandsocialcare/causesofdeath/datasets/alcoholspecificdeathsintheunitedkingdomsupplementarydatatables/current/alcoholspecificdeathssupplementary2020.xlsx
+```{r}
+if (!file.exists(file_path)) {
+  stop(paste("File not found at path:", file_path))
+}
+
+df <- read_excel(file_path, sheet = excel_sheet, skip = skip_rows)
+```
+
+## Wrangle Data
+### Remove missing columns
+We have some empty columns. We don't need these and they will cause some confusion when we create our graph. Let's start by getting rid of these. 
+```{r}
+df_cleaned <- df %>% 
+  select(-3, -7) %>%
+  slice(row_slice_start:row_slice_end)
+```
+
+### Rename columns
+We should rename our columns for clarity.
+```{r}
+colnames(df_cleaned) <- c("Year", "IMD_quintile", "Females", "Female_LCI", "Female_UCI", "Males", "Male_LCI", "Male_UCI")
+```
+
+### Convert to long data and numeric values
+In order to make our plot we need our data to be in 'long data' format. Our data is also showing as text so we should convert it to numeric and prepare for our plot. 
+```{r}
+df_long <- df_cleaned %>% 
+  pivot_longer(cols = c("Females", "Males"), 
+               names_to = "Gender", 
+               values_to = "Rate")
+
+cols_to_convert <- c("Female_LCI", "Female_UCI", "Male_LCI", "Male_UCI", "Rate")
+df_long[cols_to_convert] <- lapply(df_long[cols_to_convert], as.numeric)
+
+df_long$Year <- factor(df_long$Year)
+```
+
+### Filter the data
+For this visualisation we want to compare the 'extremes' of the most deprived quintile and the least deprived. So lets filter the data we need for our plot. 
+```{r}
+df_long <- df_long %>% filter(!is.na(Year))
+
+df_long_filtered <- df_long %>% 
+  filter(IMD_quintile %in% c(1, 5))
+
+df_long_filtered <- df_long_filtered %>% 
+  mutate(Label = case_when(
+    IMD_quintile == 1 & Gender == "Females" ~ "Q1 - Female",
+    IMD_quintile == 5 & Gender == "Females" ~ "Q5 - Female",
+    IMD_quintile == 1 & Gender == "Males" ~ "Q1 - Male",
+    IMD_quintile == 5 & Gender == "Males" ~ "Q5 - Male",
+    TRUE ~ NA_character_
+  ))
+
+# Sanity Check: Check for missing values in critical columns
+if (any(is.na(df_long_filtered$Rate))) {
+  warning("Warning: Missing values detected in 'Rate'. Check your data.")
+}
+
+# Sanity Check: Check for non-negative 'Rate'
+if (any(df_long_filtered$Rate < 0, na.rm = TRUE)) {
+  warning("Warning: Negative values detected in 'Rate'. Verify the data is correct.")
+}
+
+```
+
+## Create initial plot
+Now that our data is in the correct format we can create and save our first plot.
+```{r warning=FALSE}
+p <- ggplot(df_long_filtered, aes(x = Year, 
+                                  y = Rate, 
+                                  color = Label,  
+                                  group = Label, 
+                                  text = paste("Year:", Year, 
+                                               "<br>Rate:", Rate, 
+                                               "<br>Label:", Label))) +
+  geom_line(linewidth = 1.2) +  
+  geom_point(size = 2) +  
+  labs(
+    title = plot_title,  
+    subtitle = plot_subtitle,  
+    x = x_axis_label,
+    y = y_axis_label,
+    color = "Quintile and Gender",
+    caption = plot_caption 
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = custom_colors) +  
+  scale_x_discrete(limits = years_to_display)  
+
+# Save initial plot
+ggsave(static_plot_path, plot = p, width = 10, height = 6)
+
+#Print the plot
+print(p)
+```
+
+## Convert to an interactive plot
+The static plot definitely allows us to see the difference between the most and least deprived quintiles across gender, however it could be improved by being interactive. Let's add interactive labels to the points to help with clarity and avoid any confusion.  
+```{r} 
+interactive_plot <- ggplotly(p, tooltip = "text")
+
+# Add title, subtitle, and caption as plotly annotations
+interactive_plot <- interactive_plot %>%
+  layout(
+    title = list(
+      text = paste0(
+        plot_title,
+        '<br>',
+        '<span style="font-size: 12px;">', plot_subtitle, '</span>'
+      )
+    ),
+    annotations = list(
+      list(
+        x = 1.3,  
+        y = -0.16, 
+        text = plot_caption,  
+        showarrow = FALSE,
+        xref = 'paper',  
+        yref = 'paper',  
+        xanchor = 'right',  
+        yanchor = 'auto',
+        font = list(size = 10, color = 'black')
+      )
+    ),
+    margin = list(b = 60, r = 80), 
+    legend = list(
+      y = 0.8  
+    )
+  )
+
+# Save interactive plot as HTML
+htmlwidgets::saveWidget(as_widget(interactive_plot), interactive_plot_path)
+
+# View interactive plot
+interactive_plot
+```
+
+## Interpreation
+
+The final visualisation highlights the trends in alcohol-specific deaths across the most deprived (Q1) and least deprived (Q5) areas of the UK, disaggregated by gender. For both males and females, the incidence of alcohol-specific deaths consistently varies with deprivation level. From 2011 to 2020, mortality rates are notably higher in the most deprived quintile (Q1) compared to the least deprived quintile (Q5). The disparity is particularly pronounced for males, where alcohol-specific death rates are consistently higher across the study period. Men in Q1 have the highest mortality rates across all subgroups. Although females in Q1 also experience higher mortality than those in Q5, the gap between deprivation quintiles is generally smaller for females compared to males. These disparities may reflect gendered health inequalities Over the time period, trends differ across groups. In some years, particularly 2020, there is a noticeable increase in mortality, potentially reflecting the impact of COVID-19-related disruptions, such as increased alcohol consumption or reduced access to support services. This increase is more evident in the most deprived groups, highlighting the disproportionate effect of crises on vulnerable populations. Overall, the findings reinforce the strong link between socioeconomic deprivation and alcohol-specific mortality, with the most deprived areas consistently showing worse outcomes. 
+
+### Limitations of the Data and Visualization
+
+It is important to consider the limitations of the data when interpreting the final visualization. The analysis is based on data from England and Wales, but it does not account for potential regional variations, which may reveal important geographic disparities in alcohol-specific mortality. While the visualisation focuses on deprivation and gender as key factors, it does not include other critical variables that influence alcohol-related deaths, such as healthcare access, mental health status, housing conditions, and alcohol availability. These broader contextual factors play a significant role in driving health inequalities but are not captured in this analysis.
+The use of age-standardized rates ensures fair comparisons across groups but does not provide insights into whether age itself influences alcohol-specific mortality within different genders or deprivation levels. Additionally, while the visualisation shows a clear relationship between deprivation and mortality, it does not allow us to infer causation. Other unmeasured factors may introduce cofounding effects. Future research with a wider range of contributing factors would help give a more comprehensive picture of alcohol-specific mortality. 
+
+## Reflection and notes for follow up
+
+The visualisation effectively shows the stark difference in alcohol mortality rates between the most deprived and least deprived areas for both males and females. The use of the interactive point labels helps to clearly distinguish between groups at different points in times.  If I had more time, I would take this interactive approach further by adding a drop-down menu to allow users to filter by gender or deprivation quintile. This would allow viewers to explore trends for specific subgroups without being overwhelmed by too much information at once. 
+
+In this specific visualisation I chose to only include the most deprived and least deprived quintiles to emphasise the difference between the groups. However, to look at the finer details of how the mortality rates gradually change by each quintile, it may be useful for further studies to have all quintiles on one visualisation. This could be done with a heatmap (showing quintiles as colour intensities) or with a line graph that shows all 5 quintiles, (but with lighter colours for Q2, Q3, and Q4 to avoid clutter).
+
+Additional visualisations could also include some of the previously mentioned omitted contextual factors which may influence the findings of this data – such as access to healthcare and mental health status. 
